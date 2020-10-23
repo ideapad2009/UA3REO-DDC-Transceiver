@@ -8,7 +8,9 @@
 #include "fpga.h"
 #include "main.h"
 #include "bands.h"
-#include "peripheral.h"
+#include "front_unit.h"
+
+char version_string[19] = "2.0.2"; //1.2.3-yymmdd.hhmm (concatinate)
 
 //W25Q16
 static uint8_t Write_Enable = W25Q16_COMMAND_Write_Enable;
@@ -54,137 +56,164 @@ const char *MODE_DESCR[TRX_MODE_COUNT] = {
 	"NOTX",
 };
 
+void InitSettings(void)
+{
+	static bool already_inited = false;
+	if(already_inited) return;
+	already_inited = true;
+	
+	//concat build date to version -yymmdd.hhmm
+	uint8_t cur_len = (uint8_t)strlen(version_string);
+	strcat(version_string, "-");
+	version_string[++cur_len] = BUILD_YEAR_CH2;
+	version_string[++cur_len] = BUILD_YEAR_CH3;
+	version_string[++cur_len] = BUILD_MONTH_CH0;
+	version_string[++cur_len] = BUILD_MONTH_CH1;
+	version_string[++cur_len] = BUILD_DAY_CH0;
+	version_string[++cur_len] = BUILD_DAY_CH1;
+	version_string[++cur_len] = '.';
+	version_string[++cur_len] = BUILD_HOUR_CH0;
+	version_string[++cur_len] = BUILD_HOUR_CH1;
+	version_string[++cur_len] = BUILD_MIN_CH0;
+	version_string[++cur_len] = BUILD_MIN_CH1;
+	version_string[++cur_len] = '\0';
+	sendToDebug_strln(version_string);
+}
+
 void LoadSettings(bool clear)
 {
 	BKPSRAM_Enable();
 	memcpy(&TRX, BACKUP_SRAM_ADDR, sizeof(TRX));
-
-	//Проверка, данные в backup sram корректные, иначе используем второй банк
+	if (clear)
+		memset(&TRX, 0x00, sizeof(TRX));
+	// Check, the data in the backup sram is correct, otherwise we use the second bank
 	if (TRX.ENDBit != 100)
-	{
-		sendToDebug_strln("[ERR] BACKUP SRAM bank 1 incorrect, loading from bank 2");
-		memcpy(&TRX, BACKUP_SRAM_ADDR + sizeof(TRX), sizeof(TRX));
-		if (TRX.ENDBit != 100)
-			sendToDebug_strln("[ERR] BACKUP SRAM bank 2 incorrect");
-	}
+		sendToDebug_strln("[ERR] BACKUP SRAM incorrect");
 	else
 		sendToDebug_strln("[OK] BACKUP SRAM data succesfully loaded");
 	BKPSRAM_Disable();
 
-	if (TRX.flash_id != TRX_VERSION || clear || TRX.ENDBit != 100) //code to trace new clean flash
+	if (TRX.flash_id != SETT_VERSION || clear || TRX.ENDBit != 100) // code to trace new clean flash
 	{
-		sendToDebug_str("[ERR] Flash ID: ");
+		sendToDebug_str("[ERR] Flash ID:");
 		sendToDebug_uint8(TRX.flash_id, false);
-		TRX.flash_id = TRX_VERSION;			 //ID прошивки в eeprom, если не совпадает - используем дефолтные
-		TRX.VFO_A.Freq = 7100000;			 //сохранённая частота VFO-A
-		TRX.VFO_A.Mode = TRX_MODE_LSB;		 //сохранённая мода VFO-A
-		TRX.VFO_A.LPF_Filter_Width = 2700;	 //сохранённая ширина полосы VFO-A
-		TRX.VFO_A.HPF_Filter_Width = 300;	 //сохранённая ширина полосы VFO-A
-		TRX.VFO_A.ManualNotchFilter = false; //нотч-фильтр для вырезания помехи
-		TRX.VFO_A.AutoNotchFilter = false;	 //нотч-фильтр для вырезания помехи
-		TRX.VFO_A.NotchFC = 1000;			 //частота среза нотч-фильтра
-		TRX.VFO_A.DNR = false;				 //цифровое шумоподавление
-		TRX.VFO_A.AGC = true;				 //AGC
-		TRX.VFO_B.Freq = 14150000;			 //сохранённая частота VFO-B
-		TRX.VFO_B.Mode = TRX_MODE_USB;		 //сохранённая мода VFO-B
-		TRX.VFO_B.LPF_Filter_Width = 2700;	 //сохранённая ширина полосы VFO-B
-		TRX.VFO_B.HPF_Filter_Width = 300;	 //сохранённая ширина полосы VFO-B
-		TRX.VFO_B.ManualNotchFilter = false; //нотч-фильтр для вырезания помехи
-		TRX.VFO_B.AutoNotchFilter = false;	 //нотч-фильтр для вырезания помехи
-		TRX.VFO_B.NotchFC = 1000;			 //частота среза нотч-фильтра
-		TRX.VFO_A.DNR = false;				 //цифровое шумоподавление
-		TRX.VFO_A.AGC = true;				 //AGC
-		TRX.current_vfo = false;			 // текущая VFO (false - A)
-		TRX.ADC_Driver = false;				 //предусилитель (драйвер АЦП)
-		TRX.LNA = false;					 //LNA (малошумящий усилитель)
-		TRX.ATT = false;					 //аттенюатор
-		TRX.FM_SQL_threshold = 4;			 //FM-шумодав
-		TRX.Fast = true;					 //ускоренная смена частоты при вращении энкодера
-		TRX.ADC_PGA = false;				 //ADC преамп
+		TRX.flash_id = SETT_VERSION;		 // Firmware ID in SRAM, if it doesn't match, use the default
+		TRX.VFO_A.Freq = 7100000;			 // stored VFO-A frequency
+		TRX.VFO_A.Mode = TRX_MODE_LSB;		 // saved VFO-A mode
+		TRX.VFO_A.LPF_Filter_Width = 2700;	 // saved bandwidth for VFO-A
+		TRX.VFO_A.HPF_Filter_Width = 300;	 // saved bandwidth for VFO-A
+		TRX.VFO_A.ManualNotchFilter = false; // notch filter to cut out noise
+		TRX.VFO_A.AutoNotchFilter = false;	 // notch filter to cut out noise
+		TRX.VFO_A.NotchFC = 1000;			 // cutoff frequency of the notch filter
+		TRX.VFO_A.DNR = false;				 // digital noise reduction
+		TRX.VFO_A.AGC = true;				 // AGC
+		TRX.VFO_B.Freq = 14150000;			 // stored VFO-B frequency
+		TRX.VFO_B.Mode = TRX_MODE_USB;		 // saved VFO-B mode
+		TRX.VFO_B.LPF_Filter_Width = 2700;	 // saved bandwidth for VFO-B
+		TRX.VFO_B.HPF_Filter_Width = 300;	 // saved bandwidth for VFO-B
+		TRX.VFO_B.ManualNotchFilter = false; // notch filter to cut out noise
+		TRX.VFO_B.AutoNotchFilter = false;	 // notch filter to cut out noise
+		TRX.VFO_B.NotchFC = 1000;			 // cutoff frequency of the notch filter
+		TRX.VFO_A.DNR = false;				 // digital noise reduction
+		TRX.VFO_A.AGC = true;				 // AGC
+		TRX.current_vfo = false;			 // current VFO (false - A)
+		TRX.ADC_Driver = false;				 // preamplifier (ADC driver)
+		TRX.LNA = false;					 // LNA (Low Noise Amplifier)
+		TRX.ATT = false;					 // attenuator
+		TRX.ATT_DB = 12.0f;					 // suppress the attenuator
+		TRX.ATT_STEP = 6.0f;				 // step of tuning the attenuator
+		TRX.FM_SQL_threshold = 4;			 // FM noise reduction
+		TRX.Fast = true;					 // accelerated frequency change when the encoder rotates
+		TRX.ADC_PGA = false;				 // ADC preamp
+		TRX.ANT = false;		  // ANT-1
 		for (uint8_t i = 0; i < BANDS_COUNT; i++)
 		{
-			TRX.BANDS_SAVED_SETTINGS[i].Freq = BANDS[i].startFreq + (BANDS[i].endFreq - BANDS[i].startFreq) / 2; //сохранённые частоты по диапазонам
+			TRX.BANDS_SAVED_SETTINGS[i].Freq = BANDS[i].startFreq + (BANDS[i].endFreq - BANDS[i].startFreq) / 2; // saved frequencies by bands
 			TRX.BANDS_SAVED_SETTINGS[i].Mode = (uint8_t)getModeFromFreq(TRX.BANDS_SAVED_SETTINGS[i].Freq);
-			TRX.BANDS_SAVED_SETTINGS[i].LNA = false;
-			TRX.BANDS_SAVED_SETTINGS[i].ATT = false;
-			TRX.BANDS_SAVED_SETTINGS[i].ADC_Driver = false;
-			TRX.BANDS_SAVED_SETTINGS[i].FM_SQL_threshold = 1;
-			TRX.BANDS_SAVED_SETTINGS[i].ADC_PGA = false;
+			TRX.BANDS_SAVED_SETTINGS[i].LNA = TRX.LNA;
+			TRX.BANDS_SAVED_SETTINGS[i].ATT = TRX.ATT;
+			TRX.BANDS_SAVED_SETTINGS[i].ATT_DB = TRX.ATT_STEP;
+			TRX.BANDS_SAVED_SETTINGS[i].ANT = TRX.ANT;
+			TRX.BANDS_SAVED_SETTINGS[i].ADC_Driver = TRX.ADC_Driver;
+			TRX.BANDS_SAVED_SETTINGS[i].FM_SQL_threshold = TRX.FM_SQL_threshold;
+			TRX.BANDS_SAVED_SETTINGS[i].ADC_PGA = TRX.ADC_PGA;
 			TRX.BANDS_SAVED_SETTINGS[i].DNR = false;
 			TRX.BANDS_SAVED_SETTINGS[i].AGC = true;
 		}
-		TRX.LPF = true;			  //ФНЧ
-		TRX.BPF = true;			  //ДПФ
-		TRX.FFT_Zoom = 1;		  //приближение спектра FFT
-		TRX.AutoGain = false;	  //авто-управление предусилителем и аттенюатором
-		TRX.CWDecoder = false;	  //автоматический декодер телеграфа
-		TRX.InputType_MIC = true; //тип входа для передачи
+		TRX.RF_Filters = true;	  // LPF / HPF / BPF
+		TRX.FFT_Zoom = 2;		  // approximation of the FFT spectrum
+		TRX.AutoGain = false;	  // auto-control preamp and attenuator
+		TRX.CWDecoder = false;	  // automatic telegraph decoder
+		TRX.InputType_MIC = true; // type of input to transfer
 		TRX.InputType_LINE = false;
 		TRX.InputType_USB = false;
-		TRX.CW_LPF_Filter = 700;					//дефолтное значение ширины фильтра CW
-		TRX.CW_HPF_Filter = 0;						//дефолтное значение ширины фильтра CW
-		TRX.SSB_LPF_Filter = 2700;					//дефолтное значение ширины фильтра SSB
-		TRX.SSB_HPF_Filter = 300;					//дефолтное значение ширины фильтра SSB
-		TRX.AM_LPF_Filter = 4000;					//дефолтное значение ширины фильтра AM
-		TRX.FM_LPF_Filter = 15000;					//дефолтное значение ширины фильтра FM
-		TRX.RF_Power = 20;							//выходная мощность (%)
-		TRX.RX_AGC_speed = 3;						//скорость AGC на приём
-		TRX.TX_AGC_speed = 3;						//скорость AGC на передачу
-		TRX.BandMapEnabled = true;					//автоматическая смена моды по карте диапазонов
-		TRX.FFT_Enabled = true;						//использовать спектр FFT
-		TRX.CW_GENERATOR_SHIFT_HZ = 500;			//смещение гетеродина в CW моде
-		TRX.Key_timeout = 500;						//время отпуская передачи после последнего знака на ключе
-		TRX.FFT_Averaging = 4;						//усреднение FFT, чтобы сделать его более гладким
-		TRX.WIFI_Enabled = true;					//активировать WiFi
-		strcpy(TRX.WIFI_AP, "WIFI-AP");				//точка доступа WiFi
-		strcpy(TRX.WIFI_PASSWORD, "WIFI-PASSWORD"); //пароль к точке WiFi
-		TRX.WIFI_TIMEZONE = 3;						//часовой пояс (для синхронизации времени)
-		TRX.SPEC_Begin = 1000;						//старт диапазона анализатора спектра
-		TRX.SPEC_End = 30000;						//конец диапазона анализатора спектра
-		TRX.SPEC_TopDBM = -60;						//пороги графика
-		TRX.SPEC_BottomDBM = -130;					//пороги графика
-		TRX.CW_SelfHear = true;						//самоконтоль CW
-		TRX.ADC_RAND = false;						//ADC шифрование
-		TRX.ADC_SHDN = false;						//ADC отключение
-		TRX.ADC_DITH = false;						//ADC дизеринг
+		TRX.CW_LPF_Filter = 700;					// default value of CW filter width
+		TRX.CW_HPF_Filter = 0;						// default value of CW filter width
+		TRX.SSB_LPF_Filter = 2700;					// default value of SSB filter width
+		TRX.SSB_HPF_Filter = 300;					// default value of SSB filter width
+		TRX.AM_LPF_Filter = 4000;					// default value of AM filter width
+		TRX.FM_LPF_Filter = 15000;					// default value of the FM filter width
+		TRX.RF_Power = 20;							//output power (%)
+		TRX.RX_AGC_speed = 3;						// AGC receive rate
+		TRX.TX_AGC_speed = 3;						// AGC transfer rate
+		TRX.BandMapEnabled = true;					// automatic change of mode according to the range map
+		TRX.FFT_Enabled = true;						// use FFT spectrum
+		TRX.CW_GENERATOR_SHIFT_HZ = 500;			// LO offset in CW mode
+		TRX.CW_Key_timeout = 500;						// time of releasing transmission after the last character on the key
+		TRX.FFT_Averaging = 4;						// averaging the FFT to make it smoother
+		TRX.WIFI_Enabled = true;					// activate WiFi
+		strcpy(TRX.WIFI_AP, "WIFI-AP");				// WiFi hotspot
+		strcpy(TRX.WIFI_PASSWORD, "WIFI-PASSWORD"); // password to the WiFi point
+		TRX.WIFI_TIMEZONE = 3;						// time zone (for time synchronization)
+		TRX.SPEC_Begin = 1000;						// start spectrum analyzer range
+		TRX.SPEC_End = 30000;						// end of spectrum analyzer range
+		TRX.SPEC_TopDBM = -60;						// chart thresholds
+		TRX.SPEC_BottomDBM = -130;					// chart thresholds
+		TRX.CW_SelfHear = true;						// self-control CW
+		TRX.ADC_RAND = true;						// ADC encryption (xor randomizer)
+		TRX.ADC_SHDN = false;						// ADC disable
+		TRX.ADC_DITH = true;						// ADC dither
 		TRX.FFT_Window = 1;
-		TRX.Locked = false;				 //Блокировка управления
-		TRX.CLAR = false;				 //Режим разноса частот (приём один VFO, передача другой)
-		TRX.TWO_SIGNAL_TUNE = false;	 //Двухсигнальный генератор в режиме TUNE (1+2кГц)
-		TRX.IF_Gain = 70;				 //Усиление ПЧ, dB (до всех обработок и AGC)
-		TRX.CW_KEYER = true;			 //Автоматический ключ
-		TRX.CW_KEYER_WPM = 30;			 //Скорость автоматического ключа
-		TRX.S_METER_Style = false;		 //Вид S-метра (свечка или полоска)
-		TRX.Debug_Console = false;		 //Вывод отладки в DEBUG/UART порт
-		TRX.Dual_RX_Type = VFO_SEPARATE; //режим двойного приёмника
-		TRX.FFT_Style = 1;				 //стиль отображения FFT
-		TRX.ShiftEnabled = false;		 //активация режима SHIFT
-		TRX.SHIFT_INTERVAL = 5000;		 //Диапазон расстройки ручкой SHIFT (5000 = -5000hz / +5000hz)
-		TRX.DNR_SNR_THRESHOLD = 15;		 //Уровень цифрового шумоподавления
-		TRX.DNR_AVERAGE = 5;						//DNR усреднение при поиске средней магнитуды
-		TRX.DNR_MINIMAL = 98;						//DNR усреднение при поиске минимальной магнитуды
-		TRX.NOISE_BLANKER = false;		//подавитель коротких импульсных помех NOISE BLANKER
-		TRX.FRQ_STEP = 10;				//шаг перестройки частоты основным энкодером
-		TRX.FRQ_FAST_STEP = 100;		//шаг перестройки частоты основным энкодером в режиме FAST
-		TRX.FRQ_ENC_STEP = 25000;		//шаг перестройки частоты основным доп. энкодером
-		TRX.FRQ_ENC_FAST_STEP = 100000; //шаг перестройки частоты основным доп. энкодером в режиме FAST
-		TRX.AGC_GAIN_TARGET = -35; //Максимальное (целевое) усиление AGC
-		TRX.WIFI_CAT_SERVER = true;	//Сервер для приёма CAT команд по WIFI
-		TRX.MIC_GAIN = 3;			//Усиление микрофона
-		TRX.RX_EQ_LOW = 0;		//Эквалайзер приёмника (низкие)
-		TRX.RX_EQ_MID = 0;		//Эквалайзер приёмника (средние)
-		TRX.RX_EQ_HIG = 0;		//Эквалайзер приёмника (высокие)
-		TRX.MIC_EQ_LOW = 0;		//Эквалайзер микрофона (низкие)
-		TRX.MIC_EQ_MID = 0;		//Эквалайзер микрофона (средние)
-		TRX.MIC_EQ_HIG = 0;		//Эквалайзер микрофона (высокие)
+		TRX.Locked = false;				 // Lock control
+		TRX.CLAR = false;				 // Split frequency mode (receive one VFO, transmit another)
+		TRX.TWO_SIGNAL_TUNE = false;	 // Two-signal generator in TUNE mode (1 + 2kHz)
+		TRX.IF_Gain = 70;				 // IF gain, dB (before all processing and AGC)
+		TRX.CW_KEYER = true;			 // Automatic key
+		TRX.CW_KEYER_WPM = 30;			 // Automatic key speed
+		TRX.Debug_Console = false;		 // Debug output to DEBUG / UART port
+		TRX.Dual_RX = false;					//Dual RX feature
+		TRX.Dual_RX_Type = VFO_A_PLUS_B; // dual receiver mode
+		TRX.FFT_Color = 1;				 // FFT display color
+		TRX.FFT_Height = 2;				 // FFT display height
+		TRX.FFT_Grid = 1;					 // FFT grid style
+		TRX.ShiftEnabled = false;		 // activate the SHIFT mode
+		TRX.SHIFT_INTERVAL = 5000;		 // Detune range with the SHIFT knob (5000 = -5000hz / + 5000hz)
+		TRX.DNR_SNR_THRESHOLD = 50;		 // Digital noise reduction level
+		TRX.DNR_AVERAGE = 2;			 // DNR averaging when looking for average magnitude
+		TRX.DNR_MINIMAL = 98;			 // DNR averaging when searching for minimum magnitude
+		TRX.NOISE_BLANKER = true;		 // suppressor of short impulse noise NOISE BLANKER
+		TRX.FRQ_STEP = 10;				 // frequency tuning step by the main encoder
+		TRX.FRQ_FAST_STEP = 100;		 // frequency tuning step by the main encoder in FAST mode
+		TRX.FRQ_ENC_STEP = 25000;		 // frequency tuning step by main add. encoder
+		TRX.FRQ_ENC_FAST_STEP = 100000;	 // frequency tuning step by main add. encoder in FAST mode
+		TRX.AGC_GAIN_TARGET = -35;		 // Maximum (target) AGC gain
+		TRX.WIFI_CAT_SERVER = true;		 // Server for receiving CAT commands via WIFI
+		TRX.MIC_GAIN = 3;				 // Microphone gain
+		TRX.RX_EQ_LOW = 0;				 // Receiver Equalizer (Low)
+		TRX.RX_EQ_MID = 0;				 // Receiver EQ (mids)
+		TRX.RX_EQ_HIG = 0;				 // Receiver EQ (high)
+		TRX.MIC_EQ_LOW = 0;				 // Mic EQ (Low)
+		TRX.MIC_EQ_MID = 0;				 // Mic Equalizer (Mids)
+		TRX.MIC_EQ_HIG = 0;				 // Mic EQ (high)
+		TRX.FFT_Speed = 3;				 // FFT Speed
 
-		TRX.ENDBit = 100; //Бит окончания успешной записи в eeprom
+		TRX.ENDBit = 100; // Bit for the end of a successful write to eeprom
 		sendToDebug_strln("[OK] Loaded default settings");
 		SaveSettings();
 	}
 }
 
-void LoadCalibration(void)
+void LoadCalibration(bool clear)
 {
 	EEPROM_PowerUp();
 	uint8_t tryes = 0;
@@ -195,84 +224,56 @@ void LoadCalibration(void)
 	if (tryes >= EEPROM_REPEAT_TRYES)
 		sendToDebug_strln("[ERR] Read EEPROM CALIBRATE multiple errors");
 
-	if (CALIBRATE.flash_id != 194) //код проверки прошивки в eeprom, если не совпадает - используем дефолтные
+	if (CALIBRATE.flash_id != CALIB_VERSION || clear) // code for checking the firmware in the eeprom, if it does not match, we use the default
 	{
-		sendToDebug_str("[ERR] CALIBRATE Flash check CODE: ");
+		sendToDebug_str("[ERR] CALIBRATE Flash check CODE:");
 		sendToDebug_uint8(CALIBRATE.flash_id, false);
-		CALIBRATE.flash_id = 194; //код проверки прошивки в eeprom, если не совпадает - используем дефолтные
+		CALIBRATE.flash_id = CALIB_VERSION; // code for checking the firmware in the eeprom, if it does not match, we use the default
 
-		CALIBRATE.ENCODER_INVERT = false; //инвертировать вращение влево-вправо у основного энкодера
-		CALIBRATE.ENCODER2_INVERT = false; //инвертировать вращение влево-вправо у дополнительного энкодера
-		CALIBRATE.ENCODER_DEBOUNCE = 1; //время для устранения дребезга контактов у основного энкодера, мс
-		CALIBRATE.ENCODER2_DEBOUNCE = 50; //время для устранения дребезга контактов у дополнительного энкодера, мс
-		CALIBRATE.ENCODER_SLOW_RATE = 25;					//замедление энкодера для больших разрешений
-		CALIBRATE.ENCODER_ON_FALLING = false;	//энкодер срабатывает только на падение уровня A
-		CALIBRATE.CIC_GAINER_val = 83;		//Смещение с выхода CIC
-		CALIBRATE.CICFIR_GAINER_val = 54;	//Смещение с выхода CIC компенсатора
-		CALIBRATE.TXCICFIR_GAINER_val = 56; //Смещение с выхода TX-CIC компенсатора
-		CALIBRATE.DAC_GAINER_val = 30;		//Смещение DAC корректора
-		//Калибровка максимальной выходной мощности на каждый диапазон
-		CALIBRATE.rf_out_power[0] = 100;  // 0 mhz
-		CALIBRATE.rf_out_power[1] = 51;	  // 1 mhz
-		CALIBRATE.rf_out_power[2] = 36;	  // 2 mhz
-		CALIBRATE.rf_out_power[3] = 40;	  // 3 mhz
-		CALIBRATE.rf_out_power[4] = 48;	  // 4 mhz
-		CALIBRATE.rf_out_power[5] = 58;	  // 5 mhz
-		CALIBRATE.rf_out_power[6] = 67;	  // 6 mhz
-		CALIBRATE.rf_out_power[7] = 79;	  // 7 mhz
-		CALIBRATE.rf_out_power[8] = 85;	  // 8 mhz
-		CALIBRATE.rf_out_power[9] = 91;	  // 9 mhz
-		CALIBRATE.rf_out_power[10] = 98;  // 10 mhz
-		CALIBRATE.rf_out_power[11] = 100;  // 11 mhz
-		CALIBRATE.rf_out_power[12] = 100; // 12 mhz
-		CALIBRATE.rf_out_power[13] = 100; // 13 mhz
-		CALIBRATE.rf_out_power[14] = 100; // 14 mhz
-		CALIBRATE.rf_out_power[15] = 100; // 15 mhz
-		CALIBRATE.rf_out_power[16] = 97;  // 16 mhz
-		CALIBRATE.rf_out_power[17] = 88;  // 17 mhz
-		CALIBRATE.rf_out_power[18] = 78;  // 18 mhz
-		CALIBRATE.rf_out_power[19] = 69;  // 19 mhz
-		CALIBRATE.rf_out_power[20] = 60;  // 20 mhz
-		CALIBRATE.rf_out_power[21] = 51;  // 21 mhz
-		CALIBRATE.rf_out_power[22] = 43;  // 22 mhz
-		CALIBRATE.rf_out_power[23] = 37;  // 23 mhz
-		CALIBRATE.rf_out_power[24] = 34;  // 24 mhz
-		CALIBRATE.rf_out_power[25] = 36;  // 25 mhz
-		CALIBRATE.rf_out_power[26] = 41;  // 26 mhz
-		CALIBRATE.rf_out_power[27] = 49;  // 27 mhz
-		CALIBRATE.rf_out_power[28] = 55;  // 28 mhz
-		CALIBRATE.rf_out_power[29] = 60; // 29 mhz
-		CALIBRATE.rf_out_power[30] = 64; // 30 mhz
-		CALIBRATE.rf_out_power[31] = 66; // 31+ mhz
-		CALIBRATE.smeter_calibration = 0; //калибровка S-Метра, устанавливается при калибровке трансивера по S9 (LPF, BPF, ATT, PREAMP выключены)
-		CALIBRATE.adc_offset = 0;		  //Калибровка смещения по входу ADC (по DC)
-		CALIBRATE.att_db = -12;			  //подавление в аттенюаторе, dB
-		CALIBRATE.lna_gain_db = 11;		  //усиление в МШУ предусилителе (LNA), dB
-		//Данные по пропускной частоте с BPF фильтров (снимаются с помощью ГКЧ или выставляются по чувствительности), гЦ
-		//Далее выставляются средние пограничные частоты срабатывания
-		CALIBRATE.LPF_END = 33000000;															//LPH
-		CALIBRATE.BPF_0_START = 135000000;														//UHF
-		CALIBRATE.BPF_0_END = 150000000;														//UHF
-		CALIBRATE.BPF_1_START = 1500000;														//1500000
-		CALIBRATE.BPF_1_END = 2900000;															//3350000
-		CALIBRATE.BPF_2_START = 2900000;														//2500000
-		CALIBRATE.BPF_2_END = 4800000;															//5680000
-		CALIBRATE.BPF_3_START = 4800000;														//4000000
-		CALIBRATE.BPF_3_END = 7300000;															//8100000
-		CALIBRATE.BPF_4_START = 7300000;														//6600000
-		CALIBRATE.BPF_4_END = 12000000;															//13000000
-		CALIBRATE.BPF_5_START = 12000000;														//11000000
-		CALIBRATE.BPF_5_END = 19000000;															//20700000
-		CALIBRATE.BPF_6_START = 19000000;														//17400000
-		CALIBRATE.BPF_6_END = 30000000;															//31000000
-		CALIBRATE.BPF_7_HPF = 30000000;															//HPF
-		CALIBRATE.swr_trans_rate = 5.0f;														//SWR Transormator rate
+		CALIBRATE.ENCODER_INVERT = false;														// invert left-right rotation of the main encoder
+		CALIBRATE.ENCODER2_INVERT = false;														// invert left-right rotation of the optional encoder
+		CALIBRATE.ENCODER_DEBOUNCE = 0;															// time to eliminate contact bounce at the main encoder, ms
+		CALIBRATE.ENCODER2_DEBOUNCE = 50;														// time to eliminate contact bounce at the additional encoder, ms
+		CALIBRATE.ENCODER_SLOW_RATE = 25;														// slow down the encoder for high resolutions
+		CALIBRATE.ENCODER_ON_FALLING = false;													// encoder only triggers when level A falls
+		CALIBRATE.CIC_GAINER_val = 83;															// Offset from CIC output
+		CALIBRATE.CICFIR_GAINER_val = 54;														// Offset from the output of the CIC compensator
+		CALIBRATE.TXCICFIR_GAINER_val = 57;														// Offset from the TX-CIC output of the compensator
+		CALIBRATE.DAC_GAINER_val = 30;															// DAC offset offset
+																								// Calibrate the maximum output power for each band
+		CALIBRATE.rf_out_power_lf = 86;														// <2mhz
+		CALIBRATE.rf_out_power_hf_low = 56;														// <5mhz
+		CALIBRATE.rf_out_power_hf = 41;														// <30mhz
+		CALIBRATE.rf_out_power_hf_high = 56;														// <99.84mhz
+		CALIBRATE.rf_out_power_vhf = 85;															// 99.84-199.68mhz
+		CALIBRATE.smeter_calibration = 0;														// S-Meter calibration, set when calibrating the transceiver to S9 (LPF, BPF, ATT, PREAMP off)
+		CALIBRATE.adc_offset = 0;																// Calibrate the offset at the ADC input (DC)
+																								// Bandwidth frequency data from BPF filters (taken with GKCH or set by sensitivity), Hz
+																								// Next, the average border response frequencies are set
+		CALIBRATE.LPF_END = 60000 * 1000;														//LPF
+		CALIBRATE.BPF_0_START = 135 * 1000 * 1000;												//2m U14-RF3
+		CALIBRATE.BPF_0_END = 150 * 1000 * 1000;												//2m
+		CALIBRATE.BPF_1_START = 1500 * 1000;													//160m U16-RF2
+		CALIBRATE.BPF_1_END = 2400 * 1000;														//160m
+		CALIBRATE.BPF_2_START = 2400 * 1000;													//80m U16-RF4
+		CALIBRATE.BPF_2_END = 4700 * 1000;														//80m
+		CALIBRATE.BPF_3_START = 4700 * 1000;													//40m U16-RF1
+		CALIBRATE.BPF_3_END = 7200 * 1000;														//40m
+		CALIBRATE.BPF_4_START = 7200 * 1000;													//30m U16-RF3
+		CALIBRATE.BPF_4_END = 11500 * 1000;														//30m
+		CALIBRATE.BPF_5_START = 11500 * 1000;													//20,17m U14-RF2
+		CALIBRATE.BPF_5_END = 21000 * 1000;														//20,17m
+		CALIBRATE.BPF_6_START = 21000 * 1000;													//15,12,10,6m U14-RF4
+		CALIBRATE.BPF_6_END = 64000 * 1000;														//15,12,10,6m
+		CALIBRATE.BPF_HPF = 60000 * 1000;														//HPF U14-RF1
+		CALIBRATE.swr_trans_rate = 11.0f;														//SWR Transormator rate
 		CALIBRATE.swr_trans_rate_shadow = (int32_t)(roundf(CALIBRATE.swr_trans_rate * 100.0f)); //SWR Transormator rate UINT shadow
+		CALIBRATE.VCXO_correction = 0;															//VCXO Frequency offset
 
 		sendToDebug_strln("[OK] Loaded default calibrate settings");
 		SaveCalibration();
 	}
-	EEPROM_PowerDown();	
+	EEPROM_PowerDown();
 }
 
 inline VFO *CurrentVFO(void)
@@ -295,7 +296,7 @@ void SaveSettings(void)
 {
 	BKPSRAM_Enable();
 	memcpy(BACKUP_SRAM_ADDR, &TRX, sizeof(TRX));
-	memcpy(BACKUP_SRAM_ADDR + sizeof(TRX), &TRX, sizeof(TRX));
+	SCB_CleanDCache_by_Addr((uint32_t *)&TRX, sizeof(TRX));
 	SCB_CleanDCache_by_Addr(BACKUP_SRAM_ADDR, 1024 * 4);
 	BKPSRAM_Disable();
 	NeedSaveSettings = false;
@@ -343,10 +344,10 @@ static bool EEPROM_Sector_Erase(uint16_t size, uint32_t start, uint8_t eeprom_ba
 {
 	if (!force && !EEPROM_Enabled)
 		return true;
-	if (!force && PERIPH_SPI_process)
+	if (!force && SPI_process)
 		return false;
 	else
-		PERIPH_SPI_process = true;
+		SPI_process = true;
 
 	for (uint8_t page = 0; page <= (size / 0xFF); page++)
 	{
@@ -355,13 +356,13 @@ static bool EEPROM_Sector_Erase(uint16_t size, uint32_t start, uint8_t eeprom_ba
 		Address[1] = (BigAddress >> 8) & 0xFF;
 		Address[2] = BigAddress & 0xFF;
 
-		PERIPH_SPI_Transmit(&Write_Enable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Enable Command
+		SPI_Transmit(&Write_Enable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Enable Command
 		HAL_Delay(EEPROM_CO_DELAY);
-		PERIPH_SPI_Transmit(&Sector_Erase, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Erase Chip Command
+		SPI_Transmit(&Sector_Erase, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Erase Chip Command
 		HAL_Delay(EEPROM_CO_DELAY);
-		PERIPH_SPI_Transmit(Address, NULL, 3, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Address ( The first address of flash module is 0x00000000 )
+		SPI_Transmit(Address, NULL, 3, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Address ( The first address of flash module is 0x00000000 )
 		HAL_Delay(EEPROM_ERASE_DELAY);
-		PERIPH_SPI_Transmit(&Write_Disable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Disable Command
+		SPI_Transmit(&Write_Disable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Disable Command
 		HAL_Delay(EEPROM_CO_DELAY);
 	}
 
@@ -372,11 +373,11 @@ static bool EEPROM_Sector_Erase(uint16_t size, uint32_t start, uint8_t eeprom_ba
 		for (uint16_t i = 0; i < size; i++)
 			if (verify_clone[i] != 0xFF)
 			{
-				PERIPH_SPI_process = false;
+				SPI_process = false;
 				return false;
 			}
 	}
-	PERIPH_SPI_process = false;
+	SPI_process = false;
 	return true;
 }
 
@@ -384,15 +385,15 @@ static bool EEPROM_Write_Data(uint8_t *Buffer, uint16_t size, uint32_t margin_le
 {
 	if (!force && !EEPROM_Enabled)
 		return true;
-	if (!force && PERIPH_SPI_process)
+	if (!force && SPI_process)
 		return false;
 	else
-		PERIPH_SPI_process = true;
+		SPI_process = true;
 
 	memcpy(write_clone, Buffer, size);
 	for (uint16_t page = 0; page <= (size / 0xFF); page++)
 	{
-		PERIPH_SPI_Transmit(&Write_Enable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Enable Command
+		SPI_Transmit(&Write_Enable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Enable Command
 		HAL_Delay(EEPROM_CO_DELAY);
 
 		uint32_t BigAddress = margin_left + page * 0xFF + (eeprom_bank * W25Q16_SECTOR_SIZE);
@@ -403,13 +404,13 @@ static bool EEPROM_Write_Data(uint8_t *Buffer, uint16_t size, uint32_t margin_le
 		if (bsize > 0xFF)
 			bsize = 0xFF;
 
-		PERIPH_SPI_Transmit(&Page_Program, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Write Command
+		SPI_Transmit(&Page_Program, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Write Command
 		HAL_Delay(EEPROM_CO_DELAY);
-		PERIPH_SPI_Transmit(Address, NULL, 3, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Write Address ( The first address of flash module is 0x00000000 )
+		SPI_Transmit(Address, NULL, 3, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Write Address ( The first address of flash module is 0x00000000 )
 		HAL_Delay(EEPROM_AD_DELAY);
-		PERIPH_SPI_Transmit((uint8_t *)(write_clone + 0xFF * page), NULL, (uint8_t)bsize, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Data
+		SPI_Transmit((uint8_t *)(write_clone + 0xFF * page), NULL, (uint8_t)bsize, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Data
 		HAL_Delay(EEPROM_WR_DELAY);
-		PERIPH_SPI_Transmit(&Write_Disable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Disable Command
+		SPI_Transmit(&Write_Disable, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Write Disable Command
 		HAL_Delay(EEPROM_CO_DELAY);
 	}
 
@@ -421,11 +422,11 @@ static bool EEPROM_Write_Data(uint8_t *Buffer, uint16_t size, uint32_t margin_le
 			if (verify_clone[i] != write_clone[i])
 			{
 				EEPROM_Sector_Erase(size, margin_left, eeprom_bank, true, true);
-				PERIPH_SPI_process = false;
+				SPI_process = false;
 				return false;
 			}
 	}
-	PERIPH_SPI_process = false;
+	SPI_process = false;
 	return true;
 }
 
@@ -433,10 +434,10 @@ static bool EEPROM_Read_Data(uint8_t *Buffer, uint16_t size, uint32_t margin_lef
 {
 	if (!force && !EEPROM_Enabled)
 		return true;
-	if (!force && PERIPH_SPI_process)
+	if (!force && SPI_process)
 		return false;
 	else
-		PERIPH_SPI_process = true;
+		SPI_process = true;
 
 	for (uint16_t page = 0; page <= (size / 0xFF); page++)
 	{
@@ -448,20 +449,20 @@ static bool EEPROM_Read_Data(uint8_t *Buffer, uint16_t size, uint32_t margin_lef
 		if (bsize > 0xFF)
 			bsize = 0xFF;
 
-		bool res = PERIPH_SPI_Transmit(&Read_Data, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Read Command
+		bool res = SPI_Transmit(&Read_Data, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Read Command
 		HAL_Delay(EEPROM_CO_DELAY);
 		if (!res)
 		{
 			EEPROM_Enabled = false;
 			sendToDebug_strln("[ERR] EEPROM not found...");
 			LCD_showError("EEPROM init error", true);
-			PERIPH_SPI_process = false;
+			SPI_process = false;
 			return true;
 		}
 
-		PERIPH_SPI_Transmit(Address, NULL, 3, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Write Address
+		SPI_Transmit(Address, NULL, 3, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Write Address
 		HAL_Delay(EEPROM_AD_DELAY);
-		PERIPH_SPI_Transmit(NULL, (uint8_t *)(Buffer + 0xFF * page), (uint8_t)bsize, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Read
+		SPI_Transmit(NULL, (uint8_t *)(Buffer + 0xFF * page), (uint8_t)bsize, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Read
 		HAL_Delay(EEPROM_RD_DELAY);
 	}
 
@@ -472,11 +473,11 @@ static bool EEPROM_Read_Data(uint8_t *Buffer, uint16_t size, uint32_t margin_lef
 		for (uint16_t i = 0; i < size; i++)
 			if (read_clone[i] != Buffer[i])
 			{
-				PERIPH_SPI_process = false;
+				SPI_process = false;
 				return false;
 			}
 	}
-	PERIPH_SPI_process = false;
+	SPI_process = false;
 	return true;
 }
 
@@ -484,7 +485,7 @@ static void EEPROM_PowerDown(void)
 {
 	if (!EEPROM_Enabled)
 		return;
-	PERIPH_SPI_Transmit(&Power_Down, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Power_Down Command
+	SPI_Transmit(&Power_Down, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Power_Down Command
 	HAL_Delay(EEPROM_CO_DELAY);
 }
 
@@ -492,13 +493,13 @@ static void EEPROM_PowerUp(void)
 {
 	if (!EEPROM_Enabled)
 		return;
-	PERIPH_SPI_Transmit(&Power_Up, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, true); // Power_Up Command
+	SPI_Transmit(&Power_Up, NULL, 1, W26Q16_CS_GPIO_Port, W26Q16_CS_Pin, false); // Power_Up Command
 	HAL_Delay(EEPROM_CO_DELAY);
 }
 
 void BKPSRAM_Enable(void)
 {
-	__HAL_RCC_BKPRAM_CLK_ENABLE();
+	//__HAL_RCC_BKPRAM_CLK_ENABLE();
 	HAL_PWREx_EnableBkUpReg();
 	HAL_PWR_EnableBkUpAccess();
 }

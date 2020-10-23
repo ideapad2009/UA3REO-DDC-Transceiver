@@ -12,7 +12,8 @@
 #include "audio_filters.h"
 #include "usbd_audio_if.h"
 #include "cw_decoder.h"
-#include "peripheral.h"
+#include "front_unit.h"
+#include "rf_unit.h"
 #include "system_menu.h"
 
 volatile bool TRX_ptt_hard = false;
@@ -23,32 +24,46 @@ volatile bool TRX_old_key_serial = false;
 volatile bool TRX_key_dot_hard = false;
 volatile bool TRX_key_dash_hard = false;
 volatile uint_fast16_t TRX_Key_Timeout_est = 0;
-volatile bool TRX_IQ_swap = false;
+volatile bool TRX_RX1_IQ_swap = false;
+volatile bool TRX_RX2_IQ_swap = false;
+volatile bool TRX_TX_IQ_swap = false;
 volatile bool TRX_Tune = false;
 volatile bool TRX_Inited = false;
 volatile int_fast16_t TRX_RX_dBm = -100;
 volatile bool TRX_ADC_OTR = false;
 volatile bool TRX_DAC_OTR = false;
-volatile uint32_t TRX_Fan_Timeout = 0;	 //секунд, сколько ещё осталось крутить вентилятор
 volatile int16_t TRX_ADC_MINAMPLITUDE = 0;
 volatile int16_t TRX_ADC_MAXAMPLITUDE = 0;
+volatile int32_t TRX_VCXO_ERROR = 0;
 volatile uint16_t TRX_Volume;
-volatile uint32_t TRX_SNTP_Synced = 0; //время последней синхронизации времени
+volatile uint32_t TRX_SNTP_Synced = 0; // time of the last time synchronization
 volatile int_fast16_t TRX_SHIFT = 0;
 volatile float32_t TRX_MAX_TX_Amplitude = MAX_TX_AMPLITUDE;
 volatile float32_t TRX_PWR_Forward = 0;
 volatile float32_t TRX_PWR_Backward = 0;
 volatile float32_t TRX_SWR = 0;
 volatile float32_t TRX_ALC = 0;
-static uint_fast8_t autogain_wait_reaction = 0;	  //таймер ожидания реакции от смены режимов ATT/PRE
-static uint_fast8_t autogain_stage = 0;			  //этап отработки актокорректировщика усиления
-static uint32_t KEYER_symbol_start_time = 0;	  //время старта символа автоматического ключа
-static bool KEYER_symbol_status = false;		  //статус (сигнал или период) символа автоматического ключа
-volatile float32_t TRX_STM32_VREF = 3.3f;		  //напряжение на STM32
-volatile float32_t TRX_STM32_TEMPERATURE = 30.0f; //температура STM32
+volatile bool TRX_DAC_DIV0 = false;
+volatile bool TRX_DAC_DIV1 = false;
+volatile bool TRX_DAC_HP1 = false;
+volatile bool TRX_DAC_HP2 = false;
+volatile bool TRX_DAC_X4 = false;
+volatile bool TRX_DCDC_Freq = false;
+static uint_fast8_t autogain_wait_reaction = 0;	  // timer for waiting for a reaction from changing the ATT / PRE modes
+volatile uint_fast8_t TRX_AutoGain_Stage = 0;			  // stage of working out the amplification corrector
+static uint32_t KEYER_symbol_start_time = 0;	  // start time of the automatic key character
+static bool KEYER_symbol_status = false;		  // status (signal or period) of the automatic key symbol
+volatile float32_t TRX_STM32_VREF = 3.3f;		  // voltage on STM32
+volatile float32_t TRX_STM32_TEMPERATURE = 30.0f; // STM32 temperature
 volatile float32_t TRX_IQ_phase_error = 0.0f;
 volatile bool TRX_NeedGoToBootloader = false;
 volatile bool TRX_Temporary_Stop_BandMap = false;
+volatile bool TRX_Mute = false;
+volatile uint32_t TRX_Temporary_Mute_StartTime = 0;
+uint32_t TRX_freq_phrase = 0;
+uint32_t TRX_freq_phrase2 = 0;
+uint32_t TRX_freq_phrase_tx = 0;
+volatile int16_t TRX_RF_Temperature = 0.0f;
 
 static uint_fast8_t TRX_TXRXMode = 0; //0 - undef, 1 - rx, 2 - tx, 3 - txrx
 static void TRX_Start_RX(void);
@@ -69,35 +84,32 @@ void TRX_Init()
 	TRX_setFrequency(CurrentVFO()->Freq, CurrentVFO());
 	TRX_setMode(saved_mode, CurrentVFO());
 	HAL_ADCEx_InjectedStart(&hadc1); //ADC RF-UNIT'а
-	HAL_ADCEx_InjectedStart(&hadc3); //ADC температуры ЦПУ
+	HAL_ADCEx_InjectedStart(&hadc3); //ADC CPU temperature
 }
 
 void TRX_Restart_Mode()
 {
 	uint_fast8_t mode = CurrentVFO()->Mode;
+	//CLAR
+	if (TRX.CLAR)
+	{
+		TRX.current_vfo = !TRX.current_vfo;
+		TRX_setFrequency(CurrentVFO()->Freq, CurrentVFO());
+		TRX_setMode(CurrentVFO()->Mode, CurrentVFO());
+		LCD_UpdateQuery.FreqInfo = true;
+		LCD_UpdateQuery.TopButtons = true;
+		LCD_UpdateQuery.StatusInfoGUI = true;
+	}
+	//
 	if (TRX_on_TX())
 	{
 		if (mode == TRX_MODE_LOOPBACK || mode == TRX_MODE_CW_L || mode == TRX_MODE_CW_U)
 			TRX_Start_TXRX();
 		else
-		{
-			if (TRX.CLAR)
-			{
-				TRX.current_vfo = !TRX.current_vfo;
-				LCD_UpdateQuery.FreqInfo = true;
-				LCD_UpdateQuery.TopButtons = true;
-			}
 			TRX_Start_TX();
-		}
 	}
 	else
 	{
-		if (TRX.CLAR)
-		{
-			TRX.current_vfo = !TRX.current_vfo;
-			LCD_UpdateQuery.FreqInfo = true;
-			LCD_UpdateQuery.TopButtons = true;
-		}
 		TRX_Start_RX();
 	}
 	FFT_Reset();
@@ -108,7 +120,7 @@ static void TRX_Start_RX()
 	if (TRX_TXRXMode == 1)
 		return;
 	//sendToDebug_str("RX MODE\r\n");
-	PERIPH_RF_UNIT_UpdateState(false);
+	RF_UNIT_UpdateState(false);
 	WM8731_CleanBuffer();
 	Processor_NeedRXBuffer = false;
 	WM8731_Buffer_underrun = false;
@@ -123,9 +135,9 @@ static void TRX_Start_TX()
 	if (TRX_TXRXMode == 2)
 		return;
 	//sendToDebug_str("TX MODE\r\n");
-	PERIPH_RF_UNIT_UpdateState(false);
+	RF_UNIT_UpdateState(false);
 	WM8731_CleanBuffer();
-	HAL_Delay(10); //задерка перед подачей ВЧ сигнала, чтобы успели сработать реле
+	HAL_Delay(10); // delay before the RF signal is applied, so that the relay has time to trigger
 	WM8731_TX_mode();
 	WM8731_start_i2s_and_dma();
 	TRX_TXRXMode = 2;
@@ -136,7 +148,7 @@ static void TRX_Start_TXRX()
 	if (TRX_TXRXMode == 3)
 		return;
 	//sendToDebug_str("TXRX MODE\r\n");
-	PERIPH_RF_UNIT_UpdateState(false);
+	RF_UNIT_UpdateState(false);
 	WM8731_CleanBuffer();
 	WM8731_TXRX_mode();
 	WM8731_start_i2s_and_dma();
@@ -151,7 +163,7 @@ void TRX_ptt_change(void)
 	if (TRX_ptt_hard != TRX_new_ptt_hard)
 	{
 		TRX_ptt_hard = TRX_new_ptt_hard;
-		if(TRX_ptt_hard && (CurrentVFO()->Mode==TRX_MODE_LSB || CurrentVFO()->Mode==TRX_MODE_USB) && TRX.InputType_USB)
+		if (TRX_ptt_hard && (CurrentVFO()->Mode == TRX_MODE_LSB || CurrentVFO()->Mode == TRX_MODE_USB) && TRX.InputType_USB)
 		{
 			TRX.InputType_USB = false;
 			TRX.InputType_MIC = true;
@@ -165,7 +177,7 @@ void TRX_ptt_change(void)
 	if (TRX_ptt_cat != TRX_old_ptt_cat)
 	{
 		TRX_old_ptt_cat = TRX_ptt_cat;
-		if(TRX_ptt_cat && (CurrentVFO()->Mode==TRX_MODE_DIGI_L || CurrentVFO()->Mode==TRX_MODE_DIGI_U))
+		if (TRX_ptt_cat && (CurrentVFO()->Mode == TRX_MODE_DIGI_L || CurrentVFO()->Mode == TRX_MODE_DIGI_U))
 		{
 			TRX.InputType_USB = true;
 			TRX.InputType_MIC = false;
@@ -188,8 +200,8 @@ void TRX_key_change(void)
 	{
 		TRX_key_dot_hard = TRX_new_key_dot_hard;
 		if (TRX_key_dot_hard == true)
-			TRX_Key_Timeout_est = TRX.Key_timeout;
-		if (TRX.Key_timeout == 0)
+			TRX_Key_Timeout_est = TRX.CW_Key_timeout;
+		if (TRX.CW_Key_timeout == 0)
 			TRX_ptt_cat = TRX_key_dot_hard;
 		KEYER_symbol_start_time = 0;
 		KEYER_symbol_status = false;
@@ -202,8 +214,8 @@ void TRX_key_change(void)
 	{
 		TRX_key_dash_hard = TRX_new_key_dash_hard;
 		if (TRX_key_dash_hard == true)
-			TRX_Key_Timeout_est = TRX.Key_timeout;
-		if (TRX.Key_timeout == 0)
+			TRX_Key_Timeout_est = TRX.CW_Key_timeout;
+		if (TRX.CW_Key_timeout == 0)
 			TRX_ptt_cat = TRX_key_dash_hard;
 		KEYER_symbol_start_time = 0;
 		KEYER_symbol_status = false;
@@ -215,8 +227,8 @@ void TRX_key_change(void)
 	{
 		TRX_old_key_serial = TRX_key_serial;
 		if (TRX_key_serial == true)
-			TRX_Key_Timeout_est = TRX.Key_timeout;
-		if (TRX.Key_timeout == 0)
+			TRX_Key_Timeout_est = TRX.CW_Key_timeout;
+		if (TRX.CW_Key_timeout == 0)
 			TRX_ptt_cat = TRX_key_serial;
 		LCD_UpdateQuery.StatusInfoGUI = true;
 		FPGA_NeedSendParams = true;
@@ -228,12 +240,22 @@ void TRX_setFrequency(uint32_t _freq, VFO *vfo)
 {
 	if (_freq < 1)
 		return;
-	if (_freq >= MAX_FREQ_HZ)
-		_freq = MAX_FREQ_HZ;
+	if (_freq >= MAX_RX_FREQ_HZ)
+		_freq = MAX_RX_FREQ_HZ;
 
 	vfo->Freq = _freq;
 	if (sysmenu_spectrum_opened)
 		return;
+
+	//set DC-DC Sync freq
+	uint32_t dcdc_offset_0 = _freq % DCDC_FREQ_0;
+	uint32_t dcdc_offset_1 = _freq % DCDC_FREQ_1;
+	if (dcdc_offset_0 > dcdc_offset_1)
+		TRX_DCDC_Freq = 0;
+	else
+		TRX_DCDC_Freq = 1;
+
+	//get band
 	int_fast8_t bandFromFreq = getBandFromFreq(_freq, false);
 	if (bandFromFreq >= 0)
 	{
@@ -248,6 +270,30 @@ void TRX_setFrequency(uint32_t _freq, VFO *vfo)
 			LCD_UpdateQuery.TopButtons = true;
 		}
 	}
+
+	//get fpga freq phrase
+	VFO *current_vfo = CurrentVFO();
+	VFO *secondary_vfo = SecondaryVFO();
+	TRX_freq_phrase = getRXPhraseFromFrequency((int32_t)current_vfo->Freq + TRX_SHIFT, 1);
+	TRX_freq_phrase2 = getRXPhraseFromFrequency((int32_t)secondary_vfo->Freq + TRX_SHIFT, 2);
+	TRX_freq_phrase_tx = TRX_freq_phrase;
+	if (!TRX_on_TX())
+	{
+		switch (current_vfo->Mode)
+		{
+		case TRX_MODE_CW_L:
+			TRX_freq_phrase_tx = getRXPhraseFromFrequency((int32_t)current_vfo->Freq - TRX.CW_GENERATOR_SHIFT_HZ, 1);
+			break;
+		case TRX_MODE_CW_U:
+			TRX_freq_phrase_tx = getRXPhraseFromFrequency((int32_t)current_vfo->Freq + TRX.CW_GENERATOR_SHIFT_HZ, 1);
+			break;
+		default:
+			TRX_freq_phrase_tx = getRXPhraseFromFrequency((int32_t)current_vfo->Freq, 1);
+			break;
+		}
+	}
+
+	//
 	TRX_MAX_TX_Amplitude = getMaxTXAmplitudeOnFreq(vfo->Freq);
 	FPGA_NeedSendParams = true;
 }
@@ -277,7 +323,7 @@ void TRX_setMode(uint_fast8_t _mode, VFO *vfo)
 	case TRX_MODE_CW_U:
 		vfo->LPF_Filter_Width = TRX.CW_LPF_Filter;
 		vfo->HPF_Filter_Width = TRX.CW_HPF_Filter;
-		LCD_UpdateQuery.StatusInfoGUI = true;	
+		LCD_UpdateQuery.StatusInfoGUI = true;
 		LCD_UpdateQuery.TextBar = true;
 		break;
 	case TRX_MODE_NFM:
@@ -289,94 +335,248 @@ void TRX_setMode(uint_fast8_t _mode, VFO *vfo)
 		vfo->HPF_Filter_Width = 0;
 		break;
 	}
-	ReinitAudioFilters();
+	NeedReinitAudioFilters = true;
 	NeedSaveSettings = true;
+	LCD_UpdateQuery.StatusInfoBar = true;
+	LCD_UpdateQuery.StatusInfoGUI = true;
 }
 
 void TRX_DoAutoGain(void)
 {
+	#define SKIP_CYCLES_DOWNSTAGE 10 //skip cycles on stage downgrade
+	static uint8_t skip_cycles = 0;
+	static bool lna_may_enabled = true;
+	
 	//Process AutoGain feature
-	if (TRX.AutoGain)
+	if (TRX.AutoGain && !TRX_on_TX())
 	{
-		TRX.LPF = true;
-		TRX.BPF = true;
-		switch (autogain_stage)
+		int32_t max_amplitude = abs(TRX_ADC_MAXAMPLITUDE);
+		if(abs(TRX_ADC_MINAMPLITUDE) > max_amplitude)
+			max_amplitude = abs(TRX_ADC_MINAMPLITUDE);
+		
+		
+		switch (TRX_AutoGain_Stage)
 		{
-		case 0: //этап 1 - включаем ДПФ, ЛПФ, Аттенюатор, выключаем предусилитель (-12dB)
-			TRX.LNA = false;
-			TRX.ATT = true;
+		case 0: // stage 1 - check LNA intermod (overloading)
+			TRX.RF_Filters = false;
+			TRX.LNA = true;
+			TRX.ADC_PGA = false;
+			TRX.ADC_Driver = false;
+			TRX.ATT = false;
+			FPGA_NeedSendParams = true;
+			lna_may_enabled = true;
 			LCD_UpdateQuery.TopButtons = true;
-			autogain_stage++;
 			autogain_wait_reaction = 0;
-			//sendToDebug_str("AUTOGAIN LPF+BPF+ATT\r\n");
+			if(skip_cycles == 0)
+			{
+				sendToDebug_strln("AUTOGAIN LNA overloading check");
+				TRX_AutoGain_Stage++;
+			}
+			else
+				skip_cycles--;
 			break;
-		case 1:																					//сменили состояние, обрабатываем результаты
-			if ((TRX_ADC_MAXAMPLITUDE * db2rateV(-CALIBRATE.att_db)) <= AUTOGAIN_MAX_AMPLITUDE) //если можем выключить АТТ - переходим на следующий этап (+12dB)
+		case 1:																					// changed the state, process the results
+			if (max_amplitude <= AUTOGAIN_LNA_MAX_AMPLITUDE) // if we can turn on LNA without imd
+				lna_may_enabled = true;
+			else
+				lna_may_enabled = false;
+			
+			autogain_wait_reaction++;
+			if (autogain_wait_reaction >= AUTOGAIN_CORRECTOR_WAITSTEP)
+			{
+				TRX_AutoGain_Stage++;
+				autogain_wait_reaction = 0;
+			}
+			break;
+		case 2: // stage 2 - LPF + BPF + ATT
+			TRX.RF_Filters = true;
+			TRX.LNA = false;
+			TRX.ADC_PGA = false;
+			TRX.ADC_Driver = false;
+			TRX.ATT = true;
+			FPGA_NeedSendParams = true;
+			LCD_UpdateQuery.TopButtons = true;
+			autogain_wait_reaction = 0;
+			if(skip_cycles == 0)
+			{
+				if(!lna_may_enabled)
+					sendToDebug_strln("AUTOGAIN LNA has imd, signal too strong");
+				sendToDebug_strln("AUTOGAIN LPF + BPF + ATT");
+				TRX_AutoGain_Stage++;
+			}
+			else
+				skip_cycles--;
+			break;
+		case 3:																					// changed the state, process the results
+			if ((max_amplitude * db2rateV(-TRX.ATT_DB)) <= AUTOGAIN_TARGET_AMPLITUDE) // if we can turn off ATT - go to the next stage (+ 12dB)
 				autogain_wait_reaction++;
 			else
 				autogain_wait_reaction = 0;
 			if (autogain_wait_reaction >= AUTOGAIN_CORRECTOR_WAITSTEP)
 			{
-				autogain_stage++;
+				TRX_AutoGain_Stage++;
 				autogain_wait_reaction = 0;
 			}
 			break;
-		case 2: //этап 1 - включаем ДПФ, ЛПФ, выключаем Аттенюатор, выключаем предусилитель (+0dB)
+		case 4: // stage 3 - LPF + BPF
+			TRX.RF_Filters = true;
 			TRX.LNA = false;
 			TRX.ATT = false;
+			TRX.ADC_PGA = false;
+			TRX.ADC_Driver = false;
+			FPGA_NeedSendParams = true;
 			LCD_UpdateQuery.TopButtons = true;
-			autogain_stage++;
 			autogain_wait_reaction = 0;
-			//sendToDebug_str("AUTOGAIN LPF+BPF\r\n");
+			if(skip_cycles == 0)
+			{
+				sendToDebug_strln("AUTOGAIN LPF + BPF");
+				TRX_AutoGain_Stage++;
+			}
+			else
+				skip_cycles--;
 			break;
-		case 3: //сменили состояние, обрабатываем результаты
-			if (TRX_ADC_MAXAMPLITUDE > AUTOGAIN_MAX_AMPLITUDE)
-				autogain_stage -= 3;																							  //слишком большое усиление, возвращаемся на этап назад
-			if ((TRX_ADC_MAXAMPLITUDE * db2rateV(CALIBRATE.lna_gain_db) / db2rateV(-CALIBRATE.att_db)) <= AUTOGAIN_MAX_AMPLITUDE) //если можем включить АТТ+PREAMP - переходим на следующий этап (+20dB-12dB)
+		case 5: // changed the state, process the results
+			if (max_amplitude > AUTOGAIN_MAX_AMPLITUDE || TRX_ADC_OTR)
+			{
+				TRX_AutoGain_Stage -= 3;																							  // too much gain, go back one step
+				skip_cycles = SKIP_CYCLES_DOWNSTAGE;
+			}
+			if ((max_amplitude * db2rateV((lna_may_enabled ? ADC_LNA_GAIN_DB : 0)) / db2rateV(-TRX.ATT_DB)) <= AUTOGAIN_TARGET_AMPLITUDE) // if we can enable ATT + PREAMP - go to the next stage
 				autogain_wait_reaction++;
 			else
 				autogain_wait_reaction = 0;
 			if (autogain_wait_reaction >= AUTOGAIN_CORRECTOR_WAITSTEP)
 			{
-				autogain_stage++;
+				TRX_AutoGain_Stage++;
 				autogain_wait_reaction = 0;
 			}
 			break;
-		case 4: //этап 2 - включаем ДПФ, ЛПФ, Аттенюатор, Предусилитель (+8dB)
-			TRX.LNA = true;
+		case 6: // stage 4 - LPF + BPF + LNA + ATT
+			TRX.RF_Filters = true;
+			TRX.LNA = lna_may_enabled;
 			TRX.ATT = true;
+			TRX.ADC_PGA = false;
+			TRX.ADC_Driver = false;
+			FPGA_NeedSendParams = true;
 			LCD_UpdateQuery.TopButtons = true;
-			autogain_stage++;
 			autogain_wait_reaction = 0;
-			//sendToDebug_str("AUTOGAIN LPF+BPF+PREAMP+ATT\r\n");
+			if(skip_cycles == 0)
+			{
+				sendToDebug_strln("AUTOGAIN LPF + BPF + LNA + ATT");
+				TRX_AutoGain_Stage++;
+			}
+			else
+				skip_cycles--;
 			break;
-		case 5: //сменили состояние, обрабатываем результаты
-			if (TRX_ADC_MAXAMPLITUDE > AUTOGAIN_MAX_AMPLITUDE)
-				autogain_stage -= 3;															//слишком большое усиление, возвращаемся на этап назад
-			if ((TRX_ADC_MAXAMPLITUDE * db2rateV(-CALIBRATE.att_db)) <= AUTOGAIN_MAX_AMPLITUDE) //если можем выключить АТТ - переходим на следующий этап (+12dB)
+		case 7: // changed the state, process the results
+			if (max_amplitude > AUTOGAIN_MAX_AMPLITUDE || TRX_ADC_OTR)
+			{
+				TRX_AutoGain_Stage -= 3;															// too much gain, go back one step
+				skip_cycles = SKIP_CYCLES_DOWNSTAGE;
+			}
+			if ((max_amplitude * db2rateV(TRX.ATT_DB)) <= AUTOGAIN_TARGET_AMPLITUDE) // if we can turn off ATT - go to the next stage (+ 12dB)
 				autogain_wait_reaction++;
 			else
 				autogain_wait_reaction = 0;
 			if (autogain_wait_reaction >= AUTOGAIN_CORRECTOR_WAITSTEP)
 			{
-				autogain_stage++;
+				TRX_AutoGain_Stage++;
 				autogain_wait_reaction = 0;
 			}
 			break;
-		case 6: //этап 3 - включаем ДПФ, ЛПФ, Предусилитель, выключаем Аттенюатор (+20dB)
-			TRX.LNA = true;
+		case 8: // stage 5 - LPF + BPF + LNA
+			TRX.RF_Filters = true;
+			TRX.LNA = lna_may_enabled;
 			TRX.ATT = false;
+			TRX.ADC_PGA = false;
+			TRX.ADC_Driver = false;
+			FPGA_NeedSendParams = true;
 			LCD_UpdateQuery.TopButtons = true;
-			autogain_stage++;
 			autogain_wait_reaction = 0;
-			//sendToDebug_str("AUTOGAIN LPF+BPF+PREAMP\r\n");
+			if(skip_cycles == 0)
+			{
+				sendToDebug_strln("AUTOGAIN LPF + BPF + LNA");
+				TRX_AutoGain_Stage++;
+			}
+			else
+				skip_cycles--;
 			break;
-		case 7: //сменили состояние, обрабатываем результаты
-			if (TRX_ADC_MAXAMPLITUDE > AUTOGAIN_MAX_AMPLITUDE)
-				autogain_stage -= 3; //слишком большое усиление, возвращаемся на этап назад
+		case 9: // changed the state, process the results
+			if (max_amplitude > AUTOGAIN_MAX_AMPLITUDE || TRX_ADC_OTR)
+			{
+				TRX_AutoGain_Stage -= 3; // too much gain, go back one step
+				skip_cycles = SKIP_CYCLES_DOWNSTAGE;
+			}
+			if ((max_amplitude * db2rateV(ADC_PGA_GAIN_DB)) <= AUTOGAIN_TARGET_AMPLITUDE) // if we can turn off ATT - go to the next stage (+ 12dB)
+				autogain_wait_reaction++;
+			else
+				autogain_wait_reaction = 0;
+			if (autogain_wait_reaction >= AUTOGAIN_CORRECTOR_WAITSTEP)
+			{
+				TRX_AutoGain_Stage++;
+				autogain_wait_reaction = 0;
+			}
 			break;
+		case 10: // stage 6 - LPF + BPF + LNA + PGA
+			TRX.RF_Filters = true;
+			TRX.LNA = lna_may_enabled;
+			TRX.ATT = false;
+			TRX.ADC_PGA = true;
+			TRX.ADC_Driver = false;
+			FPGA_NeedSendParams = true;
+			LCD_UpdateQuery.TopButtons = true;
+			autogain_wait_reaction = 0;
+			if(skip_cycles == 0)
+			{
+				sendToDebug_strln("AUTOGAIN LPF + BPF + LNA + PGA");
+				TRX_AutoGain_Stage++;
+			}
+			else
+				skip_cycles--;
+			break;
+		case 11: // changed the state, process the results
+			if (max_amplitude > AUTOGAIN_MAX_AMPLITUDE || TRX_ADC_OTR)
+			{
+				TRX_AutoGain_Stage -= 3; // too much gain, go back one step
+				skip_cycles = SKIP_CYCLES_DOWNSTAGE;
+			}
+			if ((max_amplitude * db2rateV(ADC_DRIVER_GAIN_DB) * 4) <= AUTOGAIN_TARGET_AMPLITUDE) // if we can turn off ATT - go to the next stage (+ 12dB)
+				autogain_wait_reaction++;
+			else
+				autogain_wait_reaction = 0;
+			if (autogain_wait_reaction >= AUTOGAIN_CORRECTOR_WAITSTEP)
+			{
+				TRX_AutoGain_Stage++;
+				autogain_wait_reaction = 0;
+			}
+			break;
+		case 12: // stage 7 - LPF + BPF + LNA + PGA + DRIVER
+			TRX.RF_Filters = true;
+			TRX.LNA = lna_may_enabled;
+			TRX.ATT = false;
+			TRX.ADC_PGA = true;
+			TRX.ADC_Driver = true;
+			FPGA_NeedSendParams = true;
+			LCD_UpdateQuery.TopButtons = true;
+			autogain_wait_reaction = 0;
+			if(skip_cycles == 0)
+			{
+				sendToDebug_strln("AUTOGAIN LPF + BPF + LNA + PGA + DRIVER");
+				TRX_AutoGain_Stage++;
+			}
+			else
+				skip_cycles--;
+			break;
+		case 13: // changed the state, process the results
+			if (max_amplitude > AUTOGAIN_MAX_AMPLITUDE || TRX_ADC_OTR)
+			{
+				TRX_AutoGain_Stage -= 3; // too much gain, go back one step
+				skip_cycles = SKIP_CYCLES_DOWNSTAGE;
+			}
+			break;
+			
 		default:
-			autogain_stage = 0;
+			TRX_AutoGain_Stage = 0;
 			break;
 		}
 	}
@@ -384,7 +584,7 @@ void TRX_DoAutoGain(void)
 
 void TRX_DBMCalculate(void)
 {
-	TRX_RX_dBm = (int16_t)(rate2dbP(Processor_RX_Power_value) + CALIBRATE.smeter_calibration);
+	TRX_RX_dBm = (int16_t)(rate2dbV(Processor_RX_Power_value) + CALIBRATE.smeter_calibration);
 	Processor_RX_Power_value = 0;
 	if (CurrentVFO()->Mode != TRX_MODE_IQ)
 		TRX_RX_dBm -= TRX.IF_Gain;
@@ -399,15 +599,14 @@ float32_t TRX_GenerateCWSignal(float32_t power)
 	uint32_t dash_length_ms = dot_length_ms * 3;
 	uint32_t sim_space_length_ms = dot_length_ms;
 	uint32_t curTime = HAL_GetTick();
-
-	if (TRX_key_dot_hard && (KEYER_symbol_start_time + dot_length_ms) > curTime) //зажата точка
+	if (TRX_key_dot_hard && (KEYER_symbol_start_time + dot_length_ms) > curTime) // point is clamped
 	{
 		if (KEYER_symbol_status)
 			return power;
 		else
 			return 0.0f;
 	}
-	else if (TRX_key_dash_hard && (KEYER_symbol_start_time + dash_length_ms) > curTime) //зажато тире
+	else if (TRX_key_dash_hard && (KEYER_symbol_start_time + dash_length_ms) > curTime) // dash pressed
 	{
 		if (KEYER_symbol_status)
 			return power;
@@ -419,7 +618,7 @@ float32_t TRX_GenerateCWSignal(float32_t power)
 		KEYER_symbol_start_time = curTime;
 		KEYER_symbol_status = !KEYER_symbol_status;
 	}
-	return power;
+	return 0.0f;
 }
 
 float32_t TRX_getSTM32H743Temperature(void)
@@ -437,4 +636,10 @@ float32_t TRX_getSTM32H743vref(void)
 	uint32_t VREFINT_DATA = HAL_ADCEx_InjectedGetValue(&hadc3, ADC_INJECTED_RANK_2);
 	float32_t result = 3.3f * (float32_t)VREFINT_CAL / (float32_t)VREFINT_DATA; //from reference
 	return result;
+}
+
+void TRX_TemporaryMute(void)
+{
+	WM8731_Mute();
+	TRX_Temporary_Mute_StartTime = HAL_GetTick();
 }

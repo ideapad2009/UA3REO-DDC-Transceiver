@@ -33,16 +33,16 @@ IRAM2 static NR_Instance NR_RX2 = {
 	.NR_GAIN = {0},
 	.LAST_IFFT_RESULT = {0},
 };
-static float32_t von_Hann[NOISE_REDUCTION_FFT_SIZE] = {0}; //коэффициенты для оконной функции
+static float32_t von_Hann[NOISE_REDUCTION_FFT_SIZE] = {0}; // coefficients for the window function
 
-//инициализация DNR
+// initialize DNR
 void InitNoiseReduction(void)
 {
 	for (uint16_t idx = 0; idx < NOISE_REDUCTION_FFT_SIZE; idx++)
 		von_Hann[idx] = sqrtf(0.5f * (1.0f - arm_cos_f32((2.0f * PI * idx) / (float32_t)NOISE_REDUCTION_FFT_SIZE)));
 }
 
-//запуск DNR для блока данных
+// run DNR for the data block
 void processNoiseReduction(float32_t *buffer, AUDIO_PROC_RX_NUM rx_id)
 {
 	NR_Instance *instance = &NR_RX1;
@@ -111,12 +111,15 @@ void processNoiseReduction(float32_t *buffer, AUDIO_PROC_RX_NUM rx_id)
 				float32_t gain = 0.0f;
 				if (instance->FFT_COMPLEX_MAG[idx] > 0.0f)
 					gain = 1.0f - (lambda / instance->FFT_COMPLEX_MAG[idx]);
+				//delete noise
+				if (snr < threshold) 
+					gain = 0.0f;
+				//else gain = 1.0f;
 				//time smoothing (exponential averaging) of gain weights
 				instance->NR_GAIN[idx] = NOISE_REDUCTION_ALPHA * instance->NR_GAIN[idx] + (1.0f - NOISE_REDUCTION_ALPHA) * gain;
 				//frequency smoothing of gain weights
-				if (idx > 0 && idx < NOISE_REDUCTION_FFT_SIZE_HALF)
+				if (idx > 0 && (idx < NOISE_REDUCTION_FFT_SIZE_HALF - 1))
 					instance->NR_GAIN[idx] = NOISE_REDUCTION_BETA * instance->NR_GAIN[idx - 1] + (1.0f - 2 * NOISE_REDUCTION_BETA) * instance->NR_GAIN[idx] + NOISE_REDUCTION_BETA * instance->NR_GAIN[idx + 1];
-				//if (snr < threshold) instance->NR_GAIN[idx] = 0.0f; //DEBUG
 			}
 			//apply gain weighting
 			for (uint16_t idx = 0; idx < NOISE_REDUCTION_FFT_SIZE_HALF; idx++)

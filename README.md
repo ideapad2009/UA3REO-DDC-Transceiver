@@ -1,47 +1,55 @@
-# UA3REO-DDC-Transceiver
-DDC SDR Tranceiver project https://ua3reo.ru/
+# Transceiver "Wolf"
+DDC-DUC SDR Tranceiver project https://ua3reo.ru/tag/transiver-ua3reo/
 
-Проект является учебным, в нём постоянно что-то меняется, дорабатывается. Поэтому собирать только на свой страх и риск, вы можете зря потерять свои деньги и время.<br>
+На русском https://github.com/XGudron/UA3REO-DDC-Transceiver/blob/master/README.ru-RU.md
 
-## Принцип работы
+## Principle of operation
 
-ВЧ сигнал оцифровывается высокоскоростной микросхемой АЦП, и подаётся на FPGA процессор.<br>
-В нём происходит DDC/DUC преобразование (цифровое смещение частоты вниз или вверх по спектру) - по аналогии с приёмником прямого преобразования.<br>
-I и Q квадратурные сигналы, полученные в ходе преобразований, поступают на микропроцессор STM32.<br>
-В нём происходит фильтрация, (де)модуляция и вывод звука на аудио-кодек/USB. Также он обрабатывает весь пользовательский интерфейс.<br>
-При передаче процесс происходит в обратном порядке, только в конце цепочки стоит ЦАП, преобразующий цифровой сигнал обратно в аналоговый ВЧ.<br>
+The RF signal is digitized by a high-speed ADC chip and fed to an FPGA processor. <br>
+It performs DDC / DUC conversion (digital frequency shift down or up the spectrum) - by analogy with a direct conversion receiver. <br>
+The I and Q quadrature signals from the conversions are fed to the STM32 microprocessor. <br>
+It filters, (de) modulates and outputs audio to an audio codec / USB. It also handles the entire user interface. <br>
+When transmitting, the process occurs in the opposite order, only at the end of the chain there is a DAC, which converts the digital signal back to analog RF. <br>
 
-## Технические характеристики
+## Specifications
 
-* Частота приёма: 0.5mHz - 450+mHz
-* Частота передачи: 0.5mHz - 30mHz
-* Мощность TX: 5Вт+
-* Виды модуляции (TX/RX): CW, LSB, USB, AM, FM, WFM, DIGI
-* Предусилитель на 20дБ и аттенюатор на 12дБ
-* Динамический диапазон АЦП 100дБ
-* Напряжение питания: 13.8в
-* Потребляемый ток при приёме: ~0.7А
-* Потребляемый ток при передаче: ~1.7А+
+* Receiving frequencies: 0 MHz - 750 MHz
+* Transmission frequencies: 0 MHz - 160 MHz
+* TX power: 6-7W (HF), 1W (VHF)
+* Two antenna inputs
+* Modulation types (TX / RX): CW, LSB, USB, AM, FM, WFM, DIGI
+* LNA, Preamplifier
+* Adjustable attenuator 0-31dB
+* Two antenna inputs
+* Band pass filters
+* ADC dynamic range 100dB
+* Supply voltage: 13.8V (overvoltage and polarity reversal protection)
+* Consumption current when receiving: ~ 0.65A
+* Current consumption during transmission: ~ 1.7A +
 
-## Функции трансивера
+## Transceiver Features
 
-* Панорама (спектр+водопад) шириной в 96кГц
-* Регулируемая полоса пропускания: ФВЧ от 0гц до 500гц, ФНЧ от 300гц до 20кГц
-* Автоматический и ручной Notch фильтр
-* Отключаемое АРУ (AGC) с регулируемой скоростью атаки
-* Карта диапазонов, с возможностью автоматического переключения моды
-* Цифровое уменьшение шумов (DNR), подавитель импульсных помех (NB)
-* CAT/PTT виртуальные COM-порты (эмуляция FT-450)
-* Работа по USB (передача звука, CAT, KEY, PTT)
-* CW декодер, самоконтроль
-* Анализатор спектра
-* Работа по WiFi: Синхронизация времени, виртуальный CAT-интерфейс (см. Scheme/WIFI-CAT-instruction.txt)
+* Panorama (spectrum + waterfall) 96 kHz wide
+* Dual receiver (mixing A + B or A&B audio in stereo)
+* Adjustable bandwidth: HPF from 0Hz to 500Hz, LPF from 300Hz to 20kHz
+* Integrated SWR/power meter (HF)
+* Automatic and manual Notch filter
+* Switchable AGC (AGC) with adjustable attack rate
+* Range map, with the ability to automatically switch modes
+* Digital Noise Reduction (DNR), Pulse Noise Reduction (NB)
+* CAT / PTT virtual COM ports (FT-450 emulation)
+* USB operation (audio transmission, CAT, KEY, PTT)
+* CW decoder, self-control
+* Spectrum analyzer
+* AGC takes into account the characteristics of human hearing (K-Weighting)
+* TCXO frequency stabilization (it is possible to use an external clock source, such as GPS)
+* WiFi operation: Time synchronization, virtual CAT interface (see Scheme/WIFI-CAT-instruction.txt)
 
-### Чувствительность
+### Sensitivity
 
-При соотношении сигнал-шум 10dB, LNA включен, ATT, LPF, BPF выключены
+At 10dB signal-to-noise ratio, LNA is on, ATT, LPF, BPF are off
 
-Частота, mHz | Чувствительность, dBm | Чувствительность
+Frequency, mHz | Sensitivity, dBm | Sensitivity
 ------------ | ------------- | -------------
 1.9	| -131	| 63.0 nV
 3.6	| -131	| 63.0 nV
@@ -57,152 +65,162 @@ I и Q квадратурные сигналы, полученные в ходе
 145	| -128	| 88.9 nV
 435	| -121	| 0.2 uV
 
-## Сборка и прошивка
+## Build
 
-Платы заказывал в китайском сервисе JLCPCB, они и их схемы находятся в папке Scheme.<br>
-После сборки необходимо прошить FPGA и STM32 микросхемы.<br>
-Прошивка STM32 производится через Keil или по USB шнурку в DFU Mode (скриптом STM32/FLASH.bat). Либо через отладочный шнурок ST-LINK v2. Во время прошивки надо держать зажатой кнопку питания.<br>
-Прошивка FPGA происходит через программу Quartus шнурком USB-Blaster.<br>
-Правильно собранный аппарат отладки не требует, но при возникновении проблем первым делом надо проверить наличие тактовых сигналов:<br>
-90 ножка FGPA и тактовый вход АЦП - 122.88мГц, PC9 ножка STM32 - 12.288мГц, PB10 ножка STM32 - 48кГц.<br>
-При необходимости, для калибровки и точной натройки трансивера нужно отредактировать файл settings.h, например можно указать полосы пропускания ДПФ фильтров, инвертировать энкодер и т.д.(всё подписано)<br>
-WiFi модуль ESP-01 должен иметь свежую прошивку с SDK 3.0.4 и выше, и AT командами 1.7.4 и новее<br>
+I ordered the boards in the Chinese service JLCPCB, they and their schemes are in the Scheme folder. <br>
+After assembly, you need to flash FPGA and STM32 chips. <br>
+STM32 firmware is performed via Keil or via USB lanyard in DFU Mode (by STM32 / FLASH.bat script). Or via ST-LINK v2. You must hold down the power button while flashing. <br>
+FPGA firmware is performed through the Quartus program using a USB-Blaster. <br>
+A properly assembled device does not require debugging, but if problems arise, the first thing to do is to check for clock signals: <br>
+90 FGPA pin and ADC clock input - 122.88 MHz, PC9 STM32 pin - 12.288 MHz, PB10 STM32 pin - 48 kHz. <br>
+If necessary, calibrate the transceiver through the appropriate menu <br>
+WiFi module ESP-01 must have fresh firmware with SDK 3.0.4 and higher, and AT commands 1.7.4 and higher <br>
 
-## Управление
+## Management
 
-* **AF GAIN** - Громкость
-* **SHIFT** - При активной функции SHIFT - плавная отстройка от выбранной частоты трансивера. При неактивной - регулировка усиления ПЧ
-* **ENC MAIN** - Главный энкодер для управления частотой и настройками меню
-* **ENC 2** - Вспомогательный энкодер для работы с меню. В обычном режиме быстро переключает частоту
-* **BAND -** - Переключение на диапазон ниже
-* **BAND +** - Переключение на диапазон выше
-* **MODE A** - Переключение группы мод SSB->CW->DIGI->FM->AM
-* **MODE B** - Переключение подгруппы мод LSB->USB, CW_L->CW_U, DIGI_U->DIGI_L, NFM->WFM, AM->IQ->LOOP
-* **FAST** - Режим ускоренной х10 перемотки частоты основным энкодером
-* **PRE/ATT** - Переключение режимов предусилителя (МШУ-LNA) и аттенюатора
-* **PRE/ATT[зажатие]** - Включение драйвера и/или усилителя АЦП
-* **TUNE** - Включение несущей для настройки антенны
-* **A/B** - Переключение между банками настроек приёмника VFO-A/VFO-B
-* **A/B[зажатие]** - Включение двойного приёмника A&B (в каждом канале наушников свой тракт) и A+B (смешивание сигналов 2-х приёмников)
-* **AGC** - Включение АРУ (автоматической регулировки усиления)
-* **AGC[зажатие]** - Переключение на меню выбора мощности
-* **DNR** - Включение цифрового шумоподавления
-* **DNR[зажатие]** - Переключение на меню выбора скорости ключа (WPM)
-* **A=B** - Установка настроек второго банка приёмника равным текущему
-* **A=B[зажатие]** - Переключение на меню выбора полосы пропускания
-* **NOTCH** - Включение автоматического Notch-фильтра для устранения узкополосной помехи
-* **NOTCH[зажатие]** - Включение ручного Notch-фильтра для устранения узкополосной помехи
-* **CLAR** - Позволяет разнести передачу и приём на разные банки VFO
-* **CLAR[зажатие]** - Включение регулировки SHIFT с лицевой панели
-* **MENU** - Переход в меню
-* **MENU[зажатие]** - Включение блокировки клавиатуры LOCK
-* **MENU[при включении]** - Сброс настроек трансивера
+* **AF GAIN** - Volume
+* **SHIFT / GAIN** - When the SHIFT function is active - smooth offset from the selected transceiver frequency. Inactive - IF gain control
+* **ENC MAIN** - Main encoder for frequency control and menu settings
+* **ENC 2** - Auxiliary encoder for menu operation. In normal mode, quickly switches the frequency
+* **BAND -** - Switch to the band below
+* **BAND +** - Switch to higher band
+* **MODE -** - Mode group switching SSB-> CW-> DIGI-> FM-> AM
+* **MODE +** - Switching subgroup mod LSB-> USB, CW_L-> CW_U, DIGI_U-> DIGI_L, NFM-> WFM, AM-> IQ-> LOOP
+* **FAST** - Mode of fast x10 rewinding of the frequency by the main encoder (configurable)
+* **FAST [clamp]** - Frequency step settings
+* **PRE** - Turn on the preamplifier (LNA)
+* **PRE [clamp]** - Turn on the driver and / or amplifier ADC
+* **ATT** - Turn on the attenuator
+* **MUTE** - Mute the sound
+* **AGC** - Turn on AGC (automatic gain control)
+* **AGC [clamp]** - AGC settings
+* **A = B** - Setting the second bank of the receiver equal to the current
+* **BW** - Switch to bandwidth selection menu (LPF)
+* **BW [clamp]** - Switch to bandwidth selection menu (HPF)
+* **TUNE** - Turn on the carrier for tuning the antenna
+* **RF POWER** - Transmitter power selection
+* **RF POWER [clamp]** - Squelch setting
+* **A / B** - Switches between VFO-A / VFO-B receiver settings banks
+* **A / B [clamp]** - Enable automatic mode change by bendmap
+* **DOUBLE** - Turn on the dual receiver
+* **DOUBLE [clamp]** - Switching between the modes of the dual receiver A&B (each channel of the headphones has its own path) or A + B (mixing signals of 2 receivers)
+* **DNR** - Enable digital noise reduction
+* **DNR [clamp]** - Turn on the impulse noise suppressor (NB)
+* **NOTCH** - Turn on the automatic Notch filter to eliminate narrowband interference
+* **NOTCH [clamp]** - Turn on the manual Notch filter to eliminate narrowband interference
+* **CLAR** - Allows you to split transmission and reception to different VFO banks
+* **CLAR [clamp]** - Enables SHIFT control from the front panel
+* **WPM** - Switch to key speed selection menu (WPM)
+* **WPM [clamp]** - Automatic key enable
+* **MENU** - Go to the menu
+* **MENU [clamp]** - Enable key lock LOCK
+* **MENU [at power on]** - Reset transceiver settings
 
-## Настройки
+## Settings
 
 ### TRX Settings
 
-* **RF Power** - Мощность передачи, %
-* **Band Map** - Карта диапазонов, автоматически переключает моду в зависимости от частоты
-* **AutoGainer** - Автоматическое управление ATT/PREAMP в зависимости от уровня сигнала на АЦП
-* **LPF Filter** - Управление аппаратным ФНЧ Фильтром
-* **BPF Filter** - Управление аппаратным полосовым фильтром
-* **Two Signal tune** - Двухсигнальный генератор в режиме TUNE (1+2кГц)
-* **Shift Interval** - Диапазон расстройки SHIFT (+-)
-* **Freq Step** - Шаг перестройки частоты основным энкодером
-* **Freq Step FAST** - Шаг перестройки частоты основным энкодером в режиме FAST
-* **Freq Step ENC2** - Шаг перестройки частоты основным доп. энкодером
-* **Freq Step ENC2 FAST** - Шаг перестройки частоты основным доп. энкодером в режиме FAST
-* **DEBUG Console** - Вывод отладочной и служебной информации в USB/UART порты
-* **MIC IN** - Выбор микрофонного входа
-* **LINE IN** - Выбор линейного входа
-* **USB IN** - Выбор входа аудио по USB
+* **RF Power** - Transmission power,%
+* **Band Map** - Band Map, automatically switches mode depending on the frequency
+* **AutoGainer** - Automatic ATT / PREAMP control depending on the signal level on the ADC
+* **RF Filters** - Hardware filter management (LPF / HPF / BPF)
+* **Two Signal tune** - Two-signal generator in TUNE mode (1 + 2kHz)
+* **Shift Interval** - Offset range SHIFT (+ -)
+* **Freq Step** - Frequency step by the main encoder
+* **Freq Step FAST** - Frequency step by the main encoder in FAST mode
+* **Freq Step ENC2** - Frequency tuning step by main add. encoder
+* **Freq Step ENC2 FAST** - Frequency step by main add. encoder in FAST mode
+* **Att step, dB** - Attenuator tuning step
+* **DEBUG Console** - Output of debug and service information to USB / UART ports
+* **MIC IN** - Select the microphone input
+* **LINE IN** - Line input selection
+* **USB IN** - Select USB audio input
 
 ### AUDIO Settings
 
-* **IF Gain, dB** - Усиление ПЧ
-* **AGC Gain target, dBFS** - Максимальное усиление AGC
-* **Mic Gain** - Усиление микрофона
-* **Noise Blanker** - Подавитель коротких импульсных помех
-* **DNR xxx** - Подстройка цифрового шумоподавителя
-* **SSB HPF Pass** - Частота среза ФНЧ при работе в SSB
-* **SSB LPF Pass** - Частота среза ФВЧ при работе в SSB
-* **CW LPF Pass** - Частота среза ФНЧ при работе в CW
-* **FM LPF Pass** - Частота среза ФНЧ при работе в FM
-* **FM Squelch** - Уровень шумодава FM
-* **MIC EQ xxx** - Уровни эквалайзера микрофона
-* **RX EQ xxx** - Уровни эквалайзера приёмника
-* **RX AGC Speed** - Скорость срабатывания АРУ (автоматического регулятора уровня сигнала) на приём (больше-быстрее)
-* **TX AGC Speed** - Скорость срабатывания АРУ/компрессора на передачу (больше-быстрее)
+* **IF Gain, dB** - IF gain
+* **AGC Gain target, LKFS** - Maximum AGC gain (Maximum volume with AGC on)
+* **Mic Gain** - Microphone gain
+* **DNR xxx** - Digital squelch adjustment
+* **SSB HPF Pass** - LPF cutoff frequency when operating in SSB
+* **SSB LPF Pass** - HPF cutoff frequency when operating in SSB
+* **CW LPF Pass** - LPF cutoff frequency when working in CW
+* **FM LPF Pass** - LPF cutoff frequency when working in FM
+* **FM Squelch** - FM squelch level
+* **MIC EQ xxx** - Microphone equalizer levels
+* **RX EQ xxx** - Receiver equalizer levels
+* **RX AGC Speed** - AGC (automatic signal level control) response speed for reception (more-faster)
+* **TX AGC Speed** - AGC / compressor response speed for transmission (more-faster)
 
 ### CW Settings
 
-* **CW Key timeout** - Время до остановки режима передачи после отпускания ключа
-* **CW Generator shift** - Отстройка генератора приёма от частоты передачи
-* **CW Self Hear** - Самоконтроль CW (слышно нажатие ключа)
-* **CW Keyer** - Автоматический ключ
-* **CW Keyer WPM** - Скорость ключа, WPM
-* **CW Decoder** - Программный декодер CW приёма
+* **CW Key timeout** - Time before stopping the transmission mode after releasing the key
+* **CW Generator shift** - Detuning the receive generator from the transmit frequency
+* **CW Self Hear** - Self-control CW (key press is heard)
+* **CW Keyer** - Automatic Key
+* **CW Keyer WPM** - Key Speed, WPM
+* **CW Decoder** - Software CW receive decoder
 
 ### SCREEN Settings
 
-* **S-METER Marker** - Внешний вид S-Метра (свечка или линия)
-* **FFT Zoom** - Приближение спектра FFT (X1 - 96кГц, X2 - 48кГц, X4 - 24кГц, X8 - 12кГц, X16 - 6кГц)
-* **FFT Style** - Стиль отображения FFT и водопада
-* **FFT Enabled** - Включение водопада и FFT
-* **FFT Averaging** - Уровень усреднения всплесков FFT
-* **FFT Window** - Выбор окна FFT (Hamming/Blackman-Harris/Hanning)
+* **FFT Zoom** - FFT spectrum approximation (X1 - 96kHz, X2 - 48kHz, X4 - 24kHz, X8 - 12kHz, X16 - 6kHz)
+* **FFT Speed** - FFT and waterfall speed
+* **FFT Height** - FFT and waterfall proportional height
+* **FFT Color** - FFT and waterfall colors: 1(blue -> yellow -> red), 2(black -> yellow -> red), 3(black -> yellow -> green), 4(black -> red), 5(black -> green), 6(black -> blue), 7(black -> white)
+* **FFT Grid** - FFT and waterfall grids: 1(no grid), 2(fft grid), 3(fft+wtf grids), 4(wtf grid)
+* **FFT Enabled** - Enable waterfall and FFT
+* **FFT Averaging** - FFT burst averaging level
+* **FFT Window** - Select FFT window (Hamming / Blackman-Harris / Hanning)
 
-### ADC/DAC Settings
+### ADC / DAC Settings
 
-* **ADC Driver** - Включение предусилителя-драйвера АЦП
-* **ADC Preamp** - Включение предусилителя, встроенного в АЦП
-* **ADC Dither** - Включение дизеринга АЦП для приёма слабых сигналов
-* **ADC Randomizer** - Включение шифрования цифровой линии АЦП
-* **ADC Shutdown** - Выключение АЦП
+* **ADC Driver** - Turn on the preamplifier-ADC driver
+* **ADC Preamp** - Turn on the preamplifier built into the ADC
+* **ADC Dither** - Enable ADC dither for receiving weak signals
+* **ADC Randomizer** - Enables ADC digital line encryption
+* **ADC Shutdown** - Turn off the ADC
 
 ### WIFI Settings
 
-* **WIFI Enabled** - Включение WiFi модуля
-* **WIFI Select AP** - Выбор точки доступа WiFi
-* **WIFI Set AP Pass** - Установка пароля для точки доступа WiFi
-* **WIFI Timezone** - Временная зона (для обновления времени через интернет)
-* **WIFI CAT Server** - Сервер для приёма CAT команд по WIFI
+* **WIFI Enabled** - Enable WiFi module
+* **WIFI Select AP** - WiFi hotspot selection
+* **WIFI Set AP Pass** - Set password for WiFi hotspot
+* **WIFI Timezone** - Time zone (for updating the time via the Internet)
+* **WIFI CAT Server** - Server for receiving CAT commands via WIFI
 
-### Calibration [появляется при долгом нажатии кнопки MENU в меню настроек]
+### Calibration [appears by long pressing the MENU button in the settings menu]
 
-* **Encoder invert** - Инвертировать вращение основного энкодера
-* **Encoder2 invert** - Инвертировать вращение дополнительного энкодера
-* **Encoder debounce** - Время устранения дребезга контактов основного энкодера
-* **Encoder2 debounce** - Время устранения дребезга контактов дополнительного энкодера
-* **Encoder slow rate** - Коэффициент замедления основного энкодера
-* **Encoder on falling** - Энкодер срабатывает только на падение уровня A
-* **CIC Shift** - Битовое смещение после выхода CIC дециматора
-* **CICCOMP Shift** - Битовое смещение после CIC компенсатора
-* **TX CICCOMP Shift** - Битовое смещение после TX CIC компенсатора
-* **DAC Shift** - Битовое смещение выхода на ЦАП
-* **RF GAIN xx** - Калибровка максимальной выходной мощности на каждый диапазон
-* **S METER** - Калибровка S-метра
-* **ADC OFFSET** - Калибровка смещения АЦП
-* **ATT DB** - Параметры аттенюатора
-* **LNA GAIN DB** - Параметры LNA
-* **LPF END** - Параметры ФНЧ фильтра
-* **BPF x** - Параметры полосовых фильтров
-* **HPF START** - Параметры ФВЧ фильтра
-* **SWR TRANS RATE** - Подстройка коэффициента трансформации SWR-метра
+* **Encoder invert** - Invert the rotation of the main encoder
+* **Encoder2 invert** - Invert the rotation of the additional encoder
+* **Encoder debounce** - Time of debouncing contacts of the main encoder
+* **Encoder2 debounce** - Time of debouncing contacts of the additional encoder
+* **Encoder slow rate** - Deceleration rate of the main encoder
+* **Encoder on falling** - The encoder is triggered only when level A falls
+* **CIC Shift** - Bit shift after CIC decimator output
+* **CICCOMP Shift** - Bit shift after CIC compensator
+* **TX CICCOMP Shift** - Bit shift after TX CIC compensator
+* **DAC Shift** - Bit shift of the output to the DAC
+* **RF GAIN xx** - Calibration of the maximum output power for each range
+* **S METER** - S-meter calibration
+* **ADC OFFSET** - ADC offset calibration
+* **LPF END** - LPF filter parameters
+* **BPF x** - Bandpass filter parameters
+* **HPF START** - HPF filter parameters
+* **SWR TRANS RATE** - Adjustment of the transformation ratio of the SWR meter
+* **VCXO Freq** - Frequency adjustment of the reference oscillator
 
 ### Set Clock Time
 
-* Установка часов
+* Clock setting
 
 ### Flash update
 
-* Запуск обновления прошивки STM32
+* Launch STM32 firmware update
 
 ### Spectrum Analyzer
 
-* **Spectrum START** - Запуск спектрального анализатора
-* **Begin, kHz** - Стартовая частота анализатора с шагом в 1kHz
-* **End, kHz** - Конечная частота анализатора с шагом в 1kHz
-* **Top, dBm** - Верхний порог графика
-* **Bottom, dBm** - Нижний порог графика
+* **Spectrum START** - Start the spectrum analyzer
+* **Begin, kHz** - Starting frequency of the analyzer with a step of 1 kHz
+* **End, kHz** - End frequency of the analyzer in 1kHz steps
+* **Top, dBm** - Upper threshold of the graph
+* **Bottom, dBm** - Lower threshold of the graph

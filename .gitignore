@@ -6,8 +6,9 @@ Scheme/ALTIUM_DESIGNER/__Previews/*
 Scheme/EXPERIMANTAL/__Previews/*
 Scheme/ALTIUM_DESIGNER/*/__Previews/*
 Scheme/EXPERIMANTAL/*/__Previews/*
-STM32/MDK-ARM/UA3REO/UA3REO.build_log.htm
-STM32/MDK-ARM/UA3REO/UA3REO.htm
+Scheme/ALTIUM_DESIGNER/*/History/*
+STM32/MDK-ARM/WOLF/WOLF.build_log.htm
+STM32/MDK-ARM/WOLF/WOLF.htm
 Status Report.txt
 Design Rule Check*
 *~*.zip
@@ -30,4 +31,4 @@ Design Rule Check*
 *.pof
 *.rpt
 *.sof
-UA3REO.uvguix.*
+WOLF.uvguix.*
